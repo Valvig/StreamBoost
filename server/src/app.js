@@ -4,149 +4,35 @@ const cors = require('cors')
 const morgan = require('morgan')
 const session = require('express-session')
 const passport = require('passport')
+const cookieSession = require('cookie-session')
 const OAuth2Strategy = require('passport-oauth').OAuth2Strategy
-const handlebars = require('handlebars')
 
 var twitch = require('./secret/index.js')
 const PORT = process.env.PORT || 8081
 
 var request = require('request')
+var rp = require('request-promise')
+var mysql = require('mysql')
 
-var mysql = require('mysql');
-
-var con = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "streamboost"
-});
- 
 // Initialize Express and middlewares
 const app = express()
 app.use(morgan('combined'))
 app.use(bodyParser.json())
 app.use(cors())
 app.options('*', cors())
+// Cookie Options
+app.use(cookieSession({
+  name: 'session',
+  keys: ['secretcookiekey'],
+  // Cookie Options
+  maxAge: 24 * 60 * 60 * 1000 // 24 hours
+}))
 
-app.get('/test', () => {
-  
-  var name = 'LesSoyeux'
-  con.connect(function(err) {
-    if (err) {
-      console.log(err)
-    }
-    console.log("Connected!");
-    var sql = "INSERT INTO users (name) VALUES ('" + name + "')";
-    con.query(sql, function (err) {
-      if (err) {
-        console.log('user already exists')
-      }
-      console.log("1 record inserted");
-    })
-  })
-})
-
-app.post('/follows', () => {
-  var pagination = ' '
-  var id = '119638588'
-  var options = {
-    url: 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100&after=' + pagination,
-    headers: {
-      'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
-    }
-  }
-
-  function loop() {
-    if (pagination !== '') {
-      request(options, function (error, response, body) {
-        if (!error && response.statusCode == 200) {
-          var info = JSON.parse(body)
-          if (pagination !== '') {
-            console.log(pagination)
-            pagination = info.pagination.cursor
-
-            for (var i = 0; i < info.data.length; i++){
-              var userId = ''
-              var streamerId = ''
-              var x = i
-
-              getUserId(id)
-              .then(function(value) {
-                userId = value
-              })
-
-              insertStreamersIntoDB(info, x).then(function() {
-                getStreamerId(info.data[x].to_id)
-                .then(function(value) {
-                  streamerId = value
-                }).then(function () {
-                  console.log('userId, streamerId : ' + userId + ', ' + streamerId)
-                  insertUsersStreamersIntoDB(userId, streamerId)
-                })
-              })
-            }
-
-
-            options = {
-              url: 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100&after=' + pagination,
-              headers: {
-                'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
-              }
-            }
-            loop()
-          }
-        } else {
-          console.log('error ' + error)
-        }
-      })
-    }
-  }
-
-  con.connect(function(err) {
-    if (err) {
-      console.log(err)
-    }
-    console.log("Connected!")
-    loop()
-  })
-})
-
-
-
-app.post('/followers', () => {
-  var pagination = ' '
-  var id = '27802643'
-  var options = {
-    url: 'https://api.twitch.tv/helix/users/follows?to_id=' + id + '&first=100&after=' + pagination,
-    headers: {
-      'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
-    }
-  }
-  
-  function loop() {
-    if (pagination !== '') {
-      request(options, function (error, response, body) {
-        if (!error && response.statusCode == 200) {
-          var info = JSON.parse(body)
-          if (pagination !== '') {
-            console.log(pagination)
-            pagination = info.pagination.cursor
-            options = {
-              url: 'https://api.twitch.tv/helix/users/follows?to_id=' + id + '&first=100&after=' + pagination,
-              headers: {
-                'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
-              }
-            }
-            loop()
-          }
-        } else {
-          console.log('error ' + error)
-        }
-      })
-    }
-  }
-
-  loop()
+var con = mysql.createConnection({
+  host: "localhost",
+  user: "root",
+  password: "root",
+  database: "streamboost"
 })
 
 // Initialize Express and middlewares
@@ -154,6 +40,128 @@ app.use(session({secret: twitch.SESSION_SECRET, resave: false, saveUninitialized
 app.use(express.static('public'))
 app.use(passport.initialize())
 app.use(passport.session())
+
+app.all('/*', function(req, res, next) {
+  res.header("Access-Control-Allow-Origin", "*")
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
+  next()
+})
+
+const id = '27802643'
+
+function addStreamerToDB (name, id) {
+  return new Promise((resolve, reject) => {
+    // Add streamers to streamers DB
+    var sql = "INSERT INTO streamers (name, twitch_id) SELECT * FROM (SELECT '" + name + "', '" + id + "') AS tmp WHERE NOT EXISTS ( SELECT name FROM streamers WHERE name = '" + name + "' ) LIMIT 1"
+
+    con.query(sql, function (err) {
+      if (err) {
+        reject(err)
+      } else {
+        resolve()
+      }
+    })
+  })
+}
+
+function addUsersStreamersToDB (id, idStreamer) {
+  return new Promise((resolve, reject) => {
+    // Add id of user and his follows on DB
+    var sql2 = "INSERT INTO users_streamers (users_id, streamers_id) SELECT * FROM (SELECT '" + id + "', '" + idStreamer + "') AS tmp WHERE NOT EXISTS ( SELECT users_id, streamers_id FROM users_streamers WHERE users_id = '" + id + "' AND streamers_id = '" + idStreamer + "') LIMIT 1"
+
+    con.query(sql2, function (err) {
+      if (err) {
+        reject(err)
+      } else {
+        resolve()
+      }
+    })
+  })
+}
+
+function getUserData (idArray) {
+  var urlMultipleId = 'https://api.twitch.tv/helix/users?id='
+  if (idArray.length < 100) {
+    for (var i = 0 ; i < 99 ; i++){
+      urlMultipleId.concat('', idArray[i])
+      urlMultipleId.concat('', '&id=')
+    }
+    // Delete the first 100 in Array
+    idArray.splice(0, 100)
+  } else {
+    for (var i = 0 ; i < idArray.length ; i++){
+      urlMultipleId.concat('', idArray[i])
+      urlMultipleId.concat('', '&id=')
+    }
+  }
+
+  var options = {
+    url: urlMultipleId,
+    headers: {
+      'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
+    }
+  }
+
+  rp(options)
+    // Get the request response and parse it
+    .then(function (body) {
+      return(JSON.parse(body))
+    })
+    .then(function (bodyJson) {
+      // Add streamers to streamers DB
+      var sql = "INSERT INTO streamers (profile_image) SELECT * FROM (SELECT '" + profile_image + "') AS tmp WHERE NOT EXISTS ( SELECT profile_image FROM streamers WHERE profile_image = '" + profile_image + "') LIMIT 1"
+
+      con.query(sql, function (err) {
+        if (err) {
+          reject(err)
+        } else {
+          resolve()
+        }
+      })
+    })
+}
+
+function getData(id, pagination) {
+  var options = {
+    url: 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100&after=' + pagination,
+    headers: {
+      'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
+    }
+  }
+
+  rp(options)
+    // Get the request response and parse it
+    .then(function (body) {
+      return(JSON.parse(body))
+    })
+    // Use the pagination cursor to check if we have data to use
+    .then(function (bodyJson) {
+      if (bodyJson.pagination.cursor === undefined) {
+        return
+      } else {
+        con.connect(function(err) {
+          if (err) {
+            console.log(err)
+          }
+          console.log("Connected!")
+
+          for ( var i = 0 ; i < bodyJson.data.length ; i++ ) {
+            addStreamerToDB(bodyJson.data[i].to_name, bodyJson.data[i].to_id).then(function () {
+
+            })
+
+            addUsersStreamersToDB(id, bodyJson.data[i].to_id)
+          }
+        })
+        // Recursive function to check all pages of datas
+        getData(id, bodyJson.pagination.cursor)
+      }
+    })
+}
+
+app.post('/follows', () => {
+  getData(id, '')
+})
 
 // Override passport profile function to get user profile from Twitch API
 OAuth2Strategy.prototype.userProfile = function(accessToken, done) {
@@ -167,10 +175,8 @@ OAuth2Strategy.prototype.userProfile = function(accessToken, done) {
 
 request(options, function (error, response, body) {
     if (response && response.statusCode == 200) {
-      console.log('OK')
       done(null, JSON.parse(body))
     } else {
-      console.log('KO')
       done(JSON.parse(body))
     }
   })
@@ -185,7 +191,7 @@ passport.deserializeUser(function(user, done) {
 })
 
 passport
-  .use('twitch', 
+  .use('twitch',
     new OAuth2Strategy({
       authorizationURL: 'https://id.twitch.tv/oauth2/authorize',
       tokenURL: 'https://id.twitch.tv/oauth2/token',
@@ -206,48 +212,36 @@ passport
 app.get('/auth/twitch', passport.authenticate('twitch', {scope:'user_read'}))
 
 // Set route for OAuth redirect
-app.get('/auth/twitch/callback', passport.authenticate('twitch', { successRedirect: '/', failureRedirect: '/' }))
+app.get("/auth/twitch/callback", passport.authenticate("twitch"), function(req,res) {
+  // Successful authentication, redirect home after setting user datas into a cookie
+  res.cookie('userId', req.user.data[0].id)
+  res.cookie('userName', req.user.data[0].display_name)
+  res.cookie('userProfileImage', req.user.data[0].profile_image_url)
+  res.redirect("http://localhost:8080/")
+})
 
+app.get('/userFollows', function(req, res) {
+  // Add id of user and his follows on DB
+  var sql = "SELECT * FROM users_streamers WHERE users_id =" + req.query.id
+  con.query(sql, function (err, result) {
+    if (err) {
+      console.log(err)
+    } else {
+      res.send(result)
+    }
+  })
+})
 
-// Define a simple template to safely generate HTML with values from user's profile
-var template = handlebars.compile(`
-  Twitch Auth Sample
-  <table>
-    <tbody>
-      <tr>
-        <th>Access Token</th>
-        <td>{{accessToken}}</td>
-      </tr>
-      <tr>
-        <th>Refresh Token</th>
-        <td>{{refreshToken}}</td>
-      </tr>
-      <tr>
-        <th>Display Name</th>
-        <td>{{display_name}}</td>
-      </tr>
-      <tr>
-        <th>Bio</th>
-        <td>{{bio}}</td>
-      </tr>
-      <tr>
-        <th>Image</th>
-        <td>{{logo}}</td>
-      </tr>
-    </tbody>
-  </table>
-`)
-
-// If user has an authenticated session, display it, otherwise display link to authenticate
-app.get('/', function (req, res) {
-  if(req.session && req.session.passport && req.session.passport.user) {
-    console.log(req.session.passport.user)
-    res.send(template(req.session.passport.user))
-  } else {
-    res.send(
-      'Twitch Auth Sample<a href="/auth/twitch"><img src="//discuss.dev.twitch.tv/uploads/default/original/2X/0/05c21e05a37ee1291c69a747959359dab90c0af3.png" width="170" height="32"></a>'
-    )
-  }
+app.get('/streamers', function(req, res) {
+  // Add id of user and his follows on DB
+  var sql = "SELECT * FROM streamers WHERE twitch_id =" + req.query.id
+  con.query(sql, function (err, result) {
+    if (err) {
+      console.log(err)
+    } else {
+      res.send(result)
+    }
+  })
 })
 
 app.listen(PORT, function () {

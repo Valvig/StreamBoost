@@ -9,5 +9,23 @@ export default {
   },
   connect () {
     return Api().get('auth/twitch')
+  },
+  userFollows (id) {
+    return Api()
+    .get('userFollows',
+    {
+      params: {
+        id: id
+      }
+    })
+  },
+  getStreamer (id) {
+    return Api()
+    .get('streamers',
+    {
+      params: {
+        id: id
+      }
+    })
   }
 }
