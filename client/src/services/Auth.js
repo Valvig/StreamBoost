@@ -7,8 +7,8 @@ export default {
   followers () {
     return Api().post('followers')
   },
-  connect () {
-    return Api().get('auth/twitch')
+  flush () {
+    return Api().get('flush')
   },
   userFollows (id) {
     return Api()

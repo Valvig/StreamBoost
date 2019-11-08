@@ -48,8 +48,9 @@ app.all('/*', function(req, res, next) {
   next()
 })
 
-
 function addUserToDB (name, id, profile_image) {
+  console.log('Je rentre dans addUserToDB')
+  console.log('Les valeurs sont les suivantes : name = ' + name + ' id = ' + id + ' profil_image = ' + profile_image)
   return new Promise((resolve, reject) => {
     // Add streamers to streamers DB
     var sql = "INSERT INTO users (name, twitch_id, profile_image) SELECT * FROM (SELECT '" + name + "', '" + id + "', '" + profile_image + "') AS tmp WHERE NOT EXISTS ( SELECT name FROM streamers WHERE name = '" + name + "' AND twitch_id = '" + id + "' ) LIMIT 1"
@@ -64,51 +65,37 @@ function addUserToDB (name, id, profile_image) {
   })
 }
 
+function addStreamerToDB (name, id) {
+  return new Promise((resolve, reject) => {
+    // Add streamers to streamers DB
+    var sql = "INSERT INTO streamers (name, twitch_id) SELECT * FROM (SELECT '" + name + "', '" + id + "') AS tmp WHERE NOT EXISTS ( SELECT name FROM streamers WHERE name = '" + name + "' ) LIMIT 1"
 
-function getFollowsOfUser(id, pagination, arrayId) {
-  var urlData = ''
-
-  if (pagination === '') {
-    console.log('pagination est une chaine vide')
-    urlData = 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100'
-  } else {
-    urlData = 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100&after=' + pagination
-  }
-
-  var options = {
-    url: urlData,
-    headers: {
-      'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
-    }
-  }
-
-  rp(options)
-    // Get the request response and parse it
-    .then(function (body) {
-      return(JSON.parse(body))
-    })
-    // Use the pagination cursor to check if we have data to use
-    .then( async function (bodyJson) {
-      if (bodyJson.pagination.cursor === undefined) {
-        // return new Promise((resolve) => {
-        //   resolve(arrayId)
-        // })
-        console.log('Je return arrayId =' + arrayId)
-        return arrayId
+    con.query(sql, function (err) {
+      if (err) {
+        reject(err)
       } else {
-        for ( var i = 0 ; i < bodyJson.data.length ; i++ ) {
-          addStreamerToDB(bodyJson.data[i].to_name, bodyJson.data[i].to_id)
-          addUsersStreamersToDB(id, bodyJson.data[i].to_id)
-          arrayId.push(bodyJson.data[i].to_id)
-        }
-        // Recursive function to check all pages of datas
-        getFollowsOfUser(id, bodyJson.pagination.cursor, arrayId)
+        resolve()
       }
     })
+  })
 }
 
-// eslint-disable-next-line
-function updateStreamersProfileImgInDB (idArray) {  
+function addUsersStreamersToDB (id, idStreamer) {
+  return new Promise((resolve, reject) => {
+    // Add id of user and his follows on DB
+    var sql2 = "INSERT INTO users_streamers (users_id, streamers_id) SELECT * FROM (SELECT '" + id + "', '" + idStreamer + "') AS tmp WHERE NOT EXISTS ( SELECT users_id, streamers_id FROM users_streamers WHERE users_id = '" + id + "' AND streamers_id = '" + idStreamer + "') LIMIT 1"
+
+    con.query(sql2, function (err) {
+      if (err) {
+        reject(err)
+      } else {
+        resolve()
+      }
+    })
+  })
+}
+
+function updateStreamersProfileImgInDB (idArray) {
   var tooMuchData = false
 
   var urlMultipleId = 'https://api.twitch.tv/helix/users?id='
@@ -161,47 +148,38 @@ function updateStreamersProfileImgInDB (idArray) {
     })
 }
 
-// eslint-disable-next-line
-function updateStreamersFollowersNbInDB() {  
-  var sql = "SELECT twitch_id FROM streamers WHERE followers_nb = '0'";
-
-  con.query(sql, function (res, err) {
-    if (err) {
-      return (err)
-    } else {
-      console.log(res)
+function getFollowsOfUser(id, pagination, arrayId) {
+  console.log('Je rentre dans getFollowsOfUser')
+  console.log('Les valeurs sont les suivantes : id = ' + id + ' pagination = ' + pagination + ' arrayId = ' + arrayId)
+  
+  var options = {
+    url: 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100&after=' + pagination,
+    headers: {
+      'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
     }
-  })
-}
+  }
 
-function addStreamerToDB (name, id) {
-  return new Promise((resolve, reject) => {
-    // Add streamers to streamers DB
-    var sql = "INSERT INTO streamers (name, twitch_id) SELECT * FROM (SELECT '" + name + "', '" + id + "') AS tmp WHERE NOT EXISTS ( SELECT name FROM streamers WHERE name = '" + name + "' ) LIMIT 1"
-
-    con.query(sql, function (err) {
-      if (err) {
-        reject(err)
+  rp(options)
+    // Get the request response and parse it
+    .then(function (body) {
+      return(JSON.parse(body))
+    })
+    // Use the pagination cursor to check if we have data to use
+    .then(function (bodyJson) {
+      if (bodyJson.pagination.cursor === undefined) {
+        return new Promise((resolve) => {
+          resolve(arrayId)
+        })
       } else {
-        resolve()
+        for ( var i = 0 ; i < bodyJson.data.length ; i++ ) {
+          addStreamerToDB(bodyJson.data[i].to_name, bodyJson.data[i].to_id)
+          addUsersStreamersToDB(id, bodyJson.data[i].to_id)
+          arrayId.push(bodyJson.data[i].to_id)
+        }
+        // Recursive function to check all pages of datas
+        getFollowsOfUser(id, bodyJson.pagination.cursor, arrayId)
       }
     })
-  })
-}
-
-function addUsersStreamersToDB (id, idStreamer) {
-  return new Promise((resolve, reject) => {
-    // Add id of user and his follows on DB
-    var sql2 = "INSERT INTO users_streamers (users_id, streamers_id) SELECT * FROM (SELECT '" + id + "', '" + idStreamer + "') AS tmp WHERE NOT EXISTS ( SELECT users_id, streamers_id FROM users_streamers WHERE users_id = '" + id + "' AND streamers_id = '" + idStreamer + "') LIMIT 1"
-
-    con.query(sql2, function (err) {
-      if (err) {
-        reject(err)
-      } else {
-        resolve()
-      }
-    })
-  })
 }
 
 // Override passport profile function to get user profile from Twitch API
@@ -253,43 +231,31 @@ passport
 app.get('/auth/twitch', passport.authenticate('twitch', {scope:'user_read'}))
 
 // Set route for OAuth redirect
-app.get("/auth/twitch/callback", passport.authenticate("twitch"), async function(req,res) {
+app.get("/auth/twitch/callback", passport.authenticate("twitch"), function(req,res) {
   // Successful authentication, redirect home after setting user datas into a cookie
   res.cookie('userId', req.user.data[0].id)
   res.cookie('userName', req.user.data[0].display_name)
   res.cookie('userProfileImage', req.user.data[0].profile_image_url)
-  // addUserToDB(req.user.data[0].display_name, req.user.data[0].id, req.user.data[0].profile_image_url).then(function () {
-  //   console.log('Then addUserToDB')
-  //   getFollowsOfUser(req.user.data[0].id, '', []).then(function (array) {
-  //     console.log('Then getFollowsOfUser')
-  //     updateStreamersProfileImgInDB(array).then(function () {
-  //       console.log('Then updateStreamersProfileImgInDB')
-  //       updateStreamersFollowersNbInDB()
-  //     })
-  //   })
-  // })
-  // asyncCall(req)
-  asyncCall2(req).then( (test) => {
-    console.log('test vaut ' + test)
+  addUserToDB(req.user.data[0].display_name, req.user.data[0].id, req.user.data[0].profile_image_url).then(function () {
+    getFollowsOfUser(req.user.data[0].id, '', []).then(function (array) {
+      updateStreamersProfileImgInDB(array).then(function () {
+        updateStreamersFollowersNbInDB()
+      })
+    })
   })
   res.redirect("http://localhost:8080/")
 })
 
-async function asyncCall2(req) {
-  console.log('calling')
-  var userToDb = await addUserToDB(req.user.data[0].display_name, req.user.data[0].id, req.user.data[0].profile_image_url)
-  console.log(userToDb)
+function updateStreamersFollowersNbInDB() {
+  var sql = "SELECT twitch_id FROM streamers WHERE followers_nb = '0'";
 
-  var arrayId = getFollowsOfUser(req.user.data[0].id, '', [])
-
-  return new Promise((resolve) => {
-    console.log('Je suis dans la promise et arraId vaut ' + arrayId)
-    resolve(arrayId)
+  con.query(sql, function (res, err) {
+    if (err) {
+      return (err)
+    } else {
+      console.log(res)
+    }
   })
-  // var streamersProfileImgInDB = await updateStreamersProfileImgInDB(followsOfUser)
-  // console.log(streamersProfileImgInDB)
-  // var streamersFollowersNbInDB = await updateStreamersFollowersNbInDB()
-  // console.log(streamersFollowersNbInDB)
 }
 
 app.get('/userFollows', function(req, res) {
@@ -314,17 +280,6 @@ app.get('/streamers', function(req, res) {
       res.send(result)
     }
   })
-})
-
-app.get ('/flush', function () {
-  var sql = "DELETE FROM `users_streamers`"
-  con.query(sql)
-
-  var sql2 = "DELETE FROM `streamers`"
-  con.query(sql2)
-
-  var sql3 = "DELETE FROM `users`"
-  con.query(sql3)
 })
 
 app.listen(PORT, function () {

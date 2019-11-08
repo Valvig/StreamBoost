@@ -4,9 +4,9 @@
     <v-btn
         class="ma-2"
         color="secondary"
-        @click="connect()"
+        @click="flush()"
       >
-        Connect with twitch
+        Flush
       </v-btn>
     <v-btn
       class="ma-2"
@@ -70,8 +70,8 @@ export default {
       /* eslint-disable no-console */
       console.log(response.data)
     },
-    async connect () {
-      const response = await Auth.connect()
+    async flush () {
+      const response = await Auth.flush()
       /* eslint-disable no-console */
       console.log(response.data)
     },
