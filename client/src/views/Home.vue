@@ -11,9 +11,9 @@
     <v-btn
       class="ma-2"
       color="secondary"
-      @click="follows()"
+      @click="test()"
     >
-      Get Follows
+      Test
     </v-btn>
     <v-btn
       class="ma-2"
@@ -60,8 +60,8 @@ export default {
     }
   },
   methods: {
-    async follows () {
-      const response = await Auth.follows()
+    async test () {
+      const response = await Auth.test()
       /* eslint-disable no-console */
       console.log(response.data)
     },

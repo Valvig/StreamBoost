@@ -48,7 +48,6 @@ app.all('/*', function(req, res, next) {
   next()
 })
 
-
 function addUserToDB (name, id, profile_image) {
   return new Promise((resolve, reject) => {
     // Add streamers to streamers DB
@@ -64,51 +63,23 @@ function addUserToDB (name, id, profile_image) {
   })
 }
 
-
-function getFollowsOfUser(id, pagination, arrayId) {
-  var urlData = ''
-
-  if (pagination === '') {
-    console.log('pagination est une chaine vide')
-    urlData = 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100'
-  } else {
-    urlData = 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100&after=' + pagination
-  }
-
+async function requestParsedDatas (url) {
   var options = {
-    url: urlData,
+    url: url,
     headers: {
       'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
     }
   }
 
   rp(options)
-    // Get the request response and parse it
-    .then(function (body) {
-      return(JSON.parse(body))
-    })
-    // Use the pagination cursor to check if we have data to use
-    .then( async function (bodyJson) {
-      if (bodyJson.pagination.cursor === undefined) {
-        // return new Promise((resolve) => {
-        //   resolve(arrayId)
-        // })
-        console.log('Je return arrayId =' + arrayId)
-        return arrayId
-      } else {
-        for ( var i = 0 ; i < bodyJson.data.length ; i++ ) {
-          addStreamerToDB(bodyJson.data[i].to_name, bodyJson.data[i].to_id)
-          addUsersStreamersToDB(id, bodyJson.data[i].to_id)
-          arrayId.push(bodyJson.data[i].to_id)
-        }
-        // Recursive function to check all pages of datas
-        getFollowsOfUser(id, bodyJson.pagination.cursor, arrayId)
-      }
-    })
+  // Get the request response and parse it
+  .then(function (body) {
+    return(JSON.parse(body))
+  })
 }
 
 // eslint-disable-next-line
-function updateStreamersProfileImgInDB (idArray) {  
+async function updateEveryStreamersProfileImgInDB (idArray) {  
   var tooMuchData = false
 
   var urlMultipleId = 'https://api.twitch.tv/helix/users?id='
@@ -127,38 +98,33 @@ function updateStreamersProfileImgInDB (idArray) {
     }
   }
 
-  var options = {
-    url: urlMultipleId,
-    headers: {
-      'Client-ID': '3r2ymoz8fb8hcrcvvrdffz7kvop8ii'
-    }
+  const body = await requestParsedDatas(urlMultipleId)
+
+  const updatedReponse = await updateStreamersProfileImgInDB(tooMuchData, body)
+
+  if (updatedReponse === 'done') {
+    return 
+  } else {
+    updateEveryStreamersProfileImgInDB (updatedReponse.idArray)
   }
+}
 
-  rp(options)
-    // Get the request response and parse it
-    .then(function (body) {
-      return(JSON.parse(body))
-    })
-    .then(function (bodyJson) {
-      // Add streamers to streamers DB
-      for (var i = 0 ; i < bodyJson.data.length ; i++) {
-        var sql = "UPDATE streamers SET profile_image = '" + bodyJson.data[i].profile_image_url + "' WHERE twitch_id = '" + bodyJson.data[i].id + "'";
+function updateStreamersProfileImgInDB(tooMuchData, bodyJson) {
+  for (var i = 0 ; i < bodyJson.data.length ; i++) {
+    var sql = "UPDATE streamers SET profile_image = '" + bodyJson.data[i].profile_image_url + "' WHERE twitch_id = '" + bodyJson.data[i].id + "'";
 
-        con.query(sql, function (err) {
-          if (err) {
-            return (err)
-          }
-        })
-
-        if (tooMuchData === true) {
-          updateStreamersProfileImgInDB (idArray)
-        } else {
-          return new Promise((resolve) => {
-            resolve()
-          })
-        }
+    con.query(sql, function (err) {
+      if (err) {
+        return (err)
       }
     })
+
+    if (tooMuchData === true) {
+      return 'running'
+    } else {
+      return 'done'
+    }
+  }
 }
 
 // eslint-disable-next-line
@@ -210,11 +176,11 @@ OAuth2Strategy.prototype.userProfile = function(accessToken, done) {
     url: 'https://api.twitch.tv/helix/users',
     method: 'GET',
     headers: {
-    'Authorization': 'Bearer ' + accessToken
-  }
-}
+      'Authorization': 'Bearer ' + accessToken
+    }
+  } 
 
-request(options, function (error, response, body) {
+  request(options, function (error, response, body) {
     if (response && response.statusCode == 200) {
       done(null, JSON.parse(body))
     } else {
@@ -258,38 +224,24 @@ app.get("/auth/twitch/callback", passport.authenticate("twitch"), async function
   res.cookie('userId', req.user.data[0].id)
   res.cookie('userName', req.user.data[0].display_name)
   res.cookie('userProfileImage', req.user.data[0].profile_image_url)
-  // addUserToDB(req.user.data[0].display_name, req.user.data[0].id, req.user.data[0].profile_image_url).then(function () {
-  //   console.log('Then addUserToDB')
-  //   getFollowsOfUser(req.user.data[0].id, '', []).then(function (array) {
-  //     console.log('Then getFollowsOfUser')
-  //     updateStreamersProfileImgInDB(array).then(function () {
-  //       console.log('Then updateStreamersProfileImgInDB')
-  //       updateStreamersFollowersNbInDB()
-  //     })
-  //   })
-  // })
-  // asyncCall(req)
+
   asyncCall2(req).then( (test) => {
     console.log('test vaut ' + test)
   })
+
   res.redirect("http://localhost:8080/")
 })
 
 async function asyncCall2(req) {
-  console.log('calling')
-  var userToDb = await addUserToDB(req.user.data[0].display_name, req.user.data[0].id, req.user.data[0].profile_image_url)
-  console.log(userToDb)
+  // eslint-disable-next-line
+  const userToDb = await addUserToDB(req.user.data[0].display_name, req.user.data[0].id, req.user.data[0].profile_image_url)
+  // eslint-disable-next-line
+  const updateDBWithFollows = await updateDBWithFollowsData(req.user.data[0].id, '', [])
 
-  var arrayId = getFollowsOfUser(req.user.data[0].id, '', [])
-
-  return new Promise((resolve) => {
-    console.log('Je suis dans la promise et arraId vaut ' + arrayId)
-    resolve(arrayId)
-  })
-  // var streamersProfileImgInDB = await updateStreamersProfileImgInDB(followsOfUser)
-  // console.log(streamersProfileImgInDB)
+  return updateDBWithFollows
+  
+  // var streamersProfileImgInDB = await updateEveryStreamersProfileImgInDB(followsOfUser)
   // var streamersFollowersNbInDB = await updateStreamersFollowersNbInDB()
-  // console.log(streamersFollowersNbInDB)
 }
 
 app.get('/userFollows', function(req, res) {
@@ -303,6 +255,52 @@ app.get('/userFollows', function(req, res) {
     }
   })
 })
+
+async function updateDBWithFollowsData(id, pagination, array) {
+  const bodyJson = await getFollowUsingPaginationCursor(id, pagination)
+  
+  var datas = await useFollowData(id,bodyJson, array)
+
+  if (datas.status === 'done') {
+    return datas.arrayId
+  } else {
+    console.log('else , datas.status = ' + datas.status)
+    return await updateDBWithFollowsData(id, bodyJson.pagination.cursor, datas.arrayId)
+  }
+}
+
+function getFollowUsingPaginationCursor(id, pagination) {
+  var urlData = ''
+
+  if (pagination === '') {
+    urlData = 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100'
+  } else {
+    urlData = 'https://api.twitch.tv/helix/users/follows?from_id=' + id + '&first=100&after=' + pagination
+  }
+
+  requestParsedDatas(urlData)
+}
+
+function useFollowData(id, bodyJson, arrayId) {
+  if (bodyJson.pagination.cursor === undefined) {
+    var obj = {
+      arrayId: arrayId,
+      status: 'done'
+    }
+    return obj
+  } else {
+    for ( var i = 0 ; i < bodyJson.data.length ; i++ ) {
+      addStreamerToDB(bodyJson.data[i].to_name, bodyJson.data[i].to_id)
+      addUsersStreamersToDB(id, bodyJson.data[i].to_id)
+      arrayId.push(bodyJson.data[i].to_id)
+    }
+    obj = {
+      arrayId: arrayId,
+      status: 'running'
+    }
+    return obj
+  }
+}
 
 app.get('/streamers', function(req, res) {
   // Add id of user and his follows on DB

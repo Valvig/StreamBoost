@@ -1,8 +1,8 @@
 import Api from '@/services/Api'
 
 export default {
-  follows () {
-    return Api().post('follows')
+  test () {
+    return Api().get('test')
   },
   followers () {
     return Api().post('followers')
